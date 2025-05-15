@@ -1,12 +1,22 @@
 #include <PID_v1.h>
+#include <Adafruit_MAX31865.h>
 
 // Pins
-const int tempPin = A0;
-const int valvePin = 9;
+#define CS 10;
+#define MOSI 11;
+#define MISO 12;
+#define SCK 13
+#define valvePin 9;
 
-double temp_in, humid_in;
-double temp_set, humid_set;
-double temp_out, humid_out;
+// The value of the Rref resistor. Use 430.0 for PT100 and 4300.0 for PT1000
+#define RREF      4300.0
+// The 'nominal' 0-degrees-C resistance of the sensor
+// 100.0 for PT100, 1000.0 for PT1000
+#define RNOMINAL  1000.0
+
+volatile double temp_in, humid_in;
+volatile double temp_set, humid_set;
+volatile double temp_out, humid_out;
 
 //Set PID coefficients
 double Kp_t, Ki_t, Kd_t;
@@ -21,6 +31,7 @@ double readHumid();
 
 PID tempPID(&temp_in, &temp_out, &temp_set, Kp_t, Ki_t, Kd_t, DIRECT);
 PID humidPID(&humid_in, &humid_out, &humid_set, Kp_h, Ki_h, Kd_h, DIRECT);
+Adafruit_MAX31865 thermo = Adafruit_MAX31865(CS, MOSI, MISO, SCK);
 
 void setup() {
   // put your setup code here, to run once:
@@ -28,24 +39,27 @@ void setup() {
   str.reserve(200);
   tempPID.SetMode(AUTOMATIC);
   humidPID.SetMode(AUTOMATIC);
+  thermo.begin(MAX31865_3WIRE);
 }
 
 void loop() {
   // put your main code here, to run repeatedly:
     if (str_complete) {
     str.trim();
-
     if (str.startsWith("SET_TEMP:")) {
       String val = str.substring(9);
       temp_set = val.toFloat();
-      Serial.print("TEMP: ");
-      Serial.println(temp_set);
+      //Serial.print("TEMP: ");
+      //Serial.println(temp_set);
     } else {
-      Serial.println("Unknown command: " + str);
+      //Serial.println("Unknown command: " + str);
     }
     str = "";
     str_complete = false;
   }
+
+  temp_in = thermo.temperature(RNOMINAL, RREF);
+  myPID.Compute();
 }
 
 void serialEvent() {
