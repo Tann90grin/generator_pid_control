@@ -6,7 +6,7 @@
 #define MOSI 11;
 #define MISO 12;
 #define SCK 13
-#define valvePin 9;
+#define valvePin A0;
 
 // The value of the Rref resistor. Use 430.0 for PT100 and 4300.0 for PT1000
 #define RREF      4300.0
@@ -19,7 +19,7 @@ volatile double temp_set, humid_set;
 volatile double temp_out, humid_out;
 
 //Set PID coefficients
-double Kp_t, Ki_t, Kd_t;
+double Kp_t = 2.0, Ki_t = 0.5, Kd_t = 1.0;
 double Kp_h, Ki_h, Kd_h;
 
 //For serial commands
@@ -49,17 +49,17 @@ void loop() {
     if (str.startsWith("SET_TEMP:")) {
       String val = str.substring(9);
       temp_set = val.toFloat();
-      //Serial.print("TEMP: ");
-      //Serial.println(temp_set);
     } else {
       //Serial.println("Unknown command: " + str);
     }
     str = "";
     str_complete = false;
   }
-
   temp_in = thermo.temperature(RNOMINAL, RREF);
+  Serial.print("TEMP: ");
+  Serial.println(temp_set);
   myPID.Compute();
+  analogWrite(valvePin, (int)temp_out);
 }
 
 void serialEvent() {
