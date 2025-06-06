@@ -1,62 +1,120 @@
 #include <PID_v1.h>
+#include <Adafruit_Sensor.h>
+#include <Adafruit_AM2320.h>
 #include <Adafruit_MAX31865.h>
+#include <Adafruit_MCP4728.h>
 
-// Pins
-#define CS 10
-#define MOSI 11
-#define MISO 12
-#define SCK 13
-#define VPIN A0
+Adafruit_MAX31865 thermo = Adafruit_MAX31865(10);
+Adafruit_MCP4728 mcp;
+Adafruit_AM2320 humid = Adafruit_AM2320();
 
-// The value of the Rref resistor. Use 430.0 for PT100 and 4300.0 for PT1000
 #define RREF      4300.0
-// The 'nominal' 0-degrees-C resistance of the sensor
-// 100.0 for PT100, 1000.0 for PT1000
 #define RNOMINAL  1000.0
 
-double temp_in, humid_in;
-double temp_set, humid_set;
-double temp_out, humid_out;
+double temp_in, temp_set, temp_out, temp_set_buf;
+double humid_in, humid_set, humid_out;
 
-//Set PID coefficients
-double Kp_t = 2.0, Ki_t = 0.0, Kd_t = 0.0;
-double Kp_h, Ki_h, Kd_h;
+double Kp_t_slow = 50, Ki_t_slow = 3.5, Kd_t_slow = 0;
+double Kp_t_fast = 500, Ki_t_fast = 5, Kd_t_fast = 0;
+double Kp_h = 10, Ki_h = 1, Kd_h = 0;
 
-//For serial commands
 String str = "";
 bool str_complete = false;
+bool fast = false;
+bool slow = false;
+uint8_t err_counter = 0;
 
-PID tempPID(&temp_in, &temp_out, &temp_set, Kp_t, Ki_t, Kd_t, DIRECT);
-PID humidPID(&humid_in, &humid_out, &humid_set, Kp_h, Ki_h, Kd_h, DIRECT);
-Adafruit_MAX31865 thermo = Adafruit_MAX31865(CS, MOSI, MISO, SCK);
+PID tempPID(&temp_in, &temp_out, &temp_set, Kp_t_fast, Ki_t_fast, Kd_t_fast, REVERSE);
+PID humidPID(&humid_in, &humid_out, &humid_set, Kp_h, Ki_h, Kd_h, REVERSE);
 
 void setup() {
-  // put your setup code here, to run once:
   Serial.begin(115200);
   str.reserve(200);
+
   tempPID.SetMode(AUTOMATIC);
+  tempPID.SetOutputLimits(0, 4095);
+  temp_set = 20.0; // Initialize with a reasonable value
+  temp_in = 25.0;  // Initialize with a reasonable value
+  Serial.println("PID initialized");
+  
   humidPID.SetMode(AUTOMATIC);
-  thermo.begin(MAX31865_3WIRE);
+  
+  thermo.begin(MAX31865_2WIRE);
+  humid.begin();
+
+  if (!mcp.begin()){
+    Serial.println("Error: MCP4728 not found. Check wiring.");
+    while (1);
+  }
 }
 
 void loop() {
-  // put your main code here, to run repeatedly:
+
     if (str_complete) {
     str.trim();
+    Serial.print("Arduino: Received command: '");
+    Serial.print(str);
+    Serial.println("'");
+
     if (str.startsWith("SET_TEMP:")) {
       String val = str.substring(9);
+      Serial.print("Arduino: Extracted value: '");
+      Serial.print(val);
+      Serial.println("'");
+
       temp_set = (double)val.toFloat();
+      temp_set_buf = temp_set;
+      Serial.print("SETPOINT_RECEIVED:");
+      Serial.println(temp_set);
+      err_counter = 0;
     } else {
-      //Serial.println("Unknown command: " + str);
+      Serial.println("Arduino: Command not recognized");
     }
     str = "";
     str_complete = false;
   }
-  temp_in = thermo.temperature(RNOMINAL, RREF); //Read temperature
-  Serial.print("TEMP: ");
-  Serial.println(temp_set);
+
+  temp_in = thermo.temperature(RNOMINAL, RREF);
+  humid_in = humid.readHumidity();
+  Serial.print("TEMP:");
+  Serial.println(temp_in);
+  Serial.print("DEBUG: temp_in=");
+  Serial.print(temp_in);
+  Serial.print(", temp_set=");
+  Serial.print(temp_set);
+  Serial.print(", error=");
+  Serial.print(temp_set - temp_in);
+  Serial.print("HUMIDITY:");
+  Serial.println(humid_in);
+  if(err_counter < 10)
+  {
+    if(temp_set - temp_in < 5 && temp_set - temp_in > -5)
+    {
+      err_counter++;
+    }else
+    {
+      err_counter = 0;
+    }
+    if(!fast)
+    {
+      tempPID.SetTunings(Kp_t_fast, Ki_t_fast, Kd_t_fast);
+      fast = true;
+      slow = false;
+    }
+  }else{
+    if(!slow)
+    {
+      tempPID.SetTunings(Kp_t_slow, Ki_t_slow, Kd_t_slow);
+      fast = false;
+      slow = true;
+    }
+  }
   tempPID.Compute();
-  analogWrite(VPIN, (int)temp_out);
+  mcp.setChannelValue(MCP4728_CHANNEL_A, (uint16_t)temp_out);
+  Serial.print(", temp_out=");
+  Serial.println(temp_out);
+
+  delay(500);
 }
 
 void serialEvent() {
